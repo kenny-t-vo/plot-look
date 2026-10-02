@@ -1,0 +1,55 @@
+# plot look
+
+Renders the pages of a PDF drawing to PNG as they look plotted on a toner plotter and seen from a few feet away, for portfolio pages and screens. A plain export draws each line by its coverage, so hairlines fade and fine hatching turns to grey. A plotter prints every line at least one of its pixels wide, and its toner spreads. plot look renders the page the way the plotter prints it, then averages it down the way the eye does from a distance.
+
+It models one device, a 600 dpi toner plotter, calibrated on one machine. It is not a colour proof, and it doesn't model inkjet or offset printing. It reads what poppler reads, so an Illustrator file must be saved with PDF compatibility.
+
+![A test sheet: a plain export above, plot look below, both at 150 dpi](docs/demo.png)
+
+## Install
+
+Python 3.10 or later, and poppler:
+
+```
+pipx install git+https://github.com/kenny-t-vo/plot-look
+brew install poppler
+```
+
+`uv tool install git+https://github.com/kenny-t-vo/plot-look` works in place of pipx. On Debian or Ubuntu, poppler is `sudo apt install poppler-utils`; on Windows, `scoop install poppler` or conda-forge's `poppler`.
+
+## Use
+
+```
+plotlook site-plan.pdf                        # 11 x 17 in at 300 dpi, beside the PDF: site-plan-11x17.png
+plotlook sheets/ --preset 1440p --out web/    # every PDF in sheets/, fit into 2560 x 1440 px
+plotlook big.pdf --crop 10,8,18,14 --dpi 300  # a detail of a large sheet, in inches from its top left
+plotlook a.pdf --preset 4k --paper bond --jpeg
+```
+
+- **Presets.** `portfolio` (the default) fits the page into 11 x 17 in at 300 dpi, `4k` into 3840 x 2160 px and `1440p` into 2560 x 1440 px, each turned to match the page. `plot` is the page at its own size at 300 dpi. `--long PX` and `--dpi N` set a size directly.
+- **Names.** Files are named `STEM[-pN]-SIZE[-NAME][-bond][-crop-…].png` and replace a file of the same name.
+- **Saved presets.** `--save-preset NAME` saves the options given under a name, and `--preset NAME` uses them; any option you also give overrides the saved one. `--presets` lists them and `--remove-preset NAME` removes one. They're kept in `~/Library/Application Support/Plot Look/`, or in the folder `PLOTLOOK_HOME` names.
+- **macOS app.** `plotlook --make-app` writes `Plot Look.app` to `/Applications`. Drop PDFs on it, or open it to choose them, then pick a preset or set your own values. `Custom…` lists the settings and can save them as a preset. Saved presets are removed with `Remove a preset…`, since standard dialogs take no right-click.
+
+`plotlook --help` lists every option.
+
+## How it works
+
+1. Renders the page with pdftoppm at the plotter's 600 dpi, with no anti-aliasing, so every line under a pixel prints a pixel wide.
+2. Spreads the toner: coverage grows about 33 µm at each edge, so a fine line widens, a flat grey keeps its grey and a solid stays solid.
+3. Averages down to the output size in linear light, so a field of fine marks keeps the tone it has on paper.
+4. Applies an unsharp mask on darkness (`--sharpen`, 1.5) and a gamma on coverage (`--contrast`, 0.85), for how the plot reads from a few feet away.
+
+`--device-dpi` (600) and `--gain` (33 µm) set the device.
+
+## Calibration
+
+Measured on a Canon ColorWave 3600, a 600 dpi toner plotter:
+- **The 33 µm spread** comes from a printed calibration strip, where a 0.03 pt hatch at 1 mm pitch printed like an 11 percent grey and a 0.2 pt one like 15 percent.
+- **The sharpen and contrast defaults** were set against photographs of plots taken from 2 to 5 ft.
+
+Another plotter may need its own `--gain` and `--device-dpi`.
+
+## License
+
+MIT; see [LICENSE](LICENSE).

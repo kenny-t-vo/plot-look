@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plot-look"
+dynamic = ["version"]
+description = "Render PDF drawings to PNG as they look plotted on a toner plotter and seen from a normal distance"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["numpy", "Pillow"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+plotlook = "plotlook.cli:main"
+
+[project.urls]
+Source = "https://github.com/kenny-t-vo/plot-look"
+
+[tool.setuptools]
+packages = ["plotlook"]
+
+[tool.setuptools.dynamic]
+version = { attr = "plotlook.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
