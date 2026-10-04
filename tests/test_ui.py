@@ -9,7 +9,7 @@ from pdfs import dialogs, mix_pdf, needs, page_pdf
 
 def session(answers, files, *argv):
     with dialogs(answers) as (said, shown), contextlib.redirect_stderr(io.StringIO()):
-        pngs = ui.run_ui([str(f) for f in files], cli.parser().parse_args([str(a) for a in argv]))
+        pngs = ui.run_ui([str(f) for f in files], cli.parser().parse_args([str(a) for a in argv]), ui.AppleScript())
     return pngs, said, shown
 
 
@@ -40,9 +40,9 @@ def test_custom_preset_session(tmp_path):
     assert all(p.parent == folder for p in pngs) and Image.open(pngs[0]).size == (2160, 1440)
     assert 'Sharpen, an unsharp mask on darkness, 0 to 2' in said[4] and 'abc is not a number from 0 to 2' in said[5]
     assert 'built-in' in said[13] and 'Rendered 2 PNGs' in said[-1]
-    shown_folder = str(folder).replace(str(Path.home()), '~', 1)
+    shown_folder = str(folder) if sys.platform == 'win32' else str(folder).replace(str(Path.home()), '~', 1)
     for row in ('Size — Web 1440p', 'Sharpen — 1.8', 'Paper — Bond', 'Toner spread — 33 µm', f'Save to — {shown_folder}'):
-        assert row in menu[-1], row
+        assert app.q(row)[1:-1] in menu[-1], row
     assert 'OK button name "Choose" cancel button name "Back"' in menu[0]
     assert json.loads((home / 'presets.json').read_text()) == {'crisp': {
         'size': '1440p', 'sharpen': 1.8, 'contrast': 0.85, 'paper': 'bond', 'gain': 33.0, 'out': str(folder)}}

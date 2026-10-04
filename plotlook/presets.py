@@ -2,10 +2,10 @@
 
 A setting is a dict: one of size (a key of PRESETS), long (px) or dpi set, the others None; sharpen, contrast, paper,
 gain; out, a folder or None for beside each drawing. Saved presets live in presets.json in
-~/Library/Application Support/Plot Look, or in $PLOTLOOK_HOME, as
+~/Library/Application Support/Plot Look (on Windows %APPDATA%\\Plot Look), or in $PLOTLOOK_HOME, as
 {NAME: {"size": KEY | "long": PX | "dpi": N, "sharpen", "contrast", "paper", "gain", "out"?}}.
 """
-import json, os, re
+import json, os, re, sys
 from pathlib import Path
 
 from .render import ALIASES, GAIN_UM, PAPERS, PRESETS
@@ -15,7 +15,11 @@ NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]{0,31}$')
 
 
 def home():
-    return Path(os.environ.get('PLOTLOOK_HOME') or Path.home() / 'Library' / 'Application Support' / 'Plot Look')
+    if os.environ.get('PLOTLOOK_HOME'):
+        return Path(os.environ['PLOTLOOK_HOME'])
+    if sys.platform == 'win32' and os.environ.get('APPDATA'):
+        return Path(os.environ['APPDATA']) / 'Plot Look'
+    return Path.home() / 'Library' / 'Application Support' / 'Plot Look'
 
 
 def read_json(name):

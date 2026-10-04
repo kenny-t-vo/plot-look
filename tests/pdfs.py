@@ -1,5 +1,5 @@
 """helpers for the tests: small PDFs written by hand, tools a test needs, and the dialogs stubbed"""
-import contextlib, os, shutil
+import contextlib, os, shutil, sys
 from pathlib import Path
 
 try:
@@ -11,12 +11,22 @@ except ImportError:
 def needs(*tools):
     """skip a test when a tool is not on the PATH (f.needs lets a runner without pytest skip it too)"""
     def mark(f):
-        f.needs = tools
+        f.needs = (*getattr(f, 'needs', ()), *tools)
         if pytest:
             missing = [t for t in tools if not shutil.which(t)]
             f = pytest.mark.skipif(bool(missing), reason=f'no {", ".join(missing)}')(f)
         return f
     return mark
+
+
+def needs_window(f):
+    """skip a test that opens Tk windows where tkinter or a display is missing, named in f.needs as a missing tool"""
+    try:
+        import tkinter  # noqa: F401
+        ok = sys.platform in ('darwin', 'win32') or bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+    except ImportError:
+        ok = False
+    return f if ok else needs('Tk windows')(f)
 
 
 def mini_pdf(path, objs):

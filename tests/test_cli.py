@@ -101,7 +101,7 @@ def test_missing_poppler(tmp_path):
 
 
 def test_version_help_and_platform():
-    """--version prints the version, the help has examples, and --ui and --make-app say they are macOS only elsewhere"""
+    """--version prints the version, the help has examples, and --make-app says it is macOS only elsewhere"""
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         try:
@@ -113,6 +113,6 @@ def test_version_help_and_platform():
     plat = sys.platform
     sys.platform = 'linux'
     try:
-        assert 'macOS only' in refused('--ui') and 'macOS only' in refused('--make-app')
+        assert 'macOS only' in refused('--make-app')
     finally:
         sys.platform = plat

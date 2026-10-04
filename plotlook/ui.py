@@ -1,4 +1,5 @@
-"""--ui: standard AppleScript dialogs through osascript (macOS).
+"""--ui: the dialogs, standard AppleScript ones through osascript on macOS (AppleScript below), Tk ones in a window
+elsewhere and in the downloadable apps (tkdialogs.Tk). Both take the same calls.
 
 The files when none are given; then a list of the built-in presets, the saved presets, Custom… and, when there are
 saved presets, Remove a preset…, with Render as its button and the last choice selected. Custom… lists the settings
@@ -6,7 +7,7 @@ with their values, each changed in one small dialog, then Render and Save as pre
 the last Save to. Standard dialogs take no right-click, so removing goes through Remove a preset…. ui.json beside
 presets.json keeps the last choice and the last Save to. After rendering, a count with Show in Finder.
 """
-import subprocess
+import subprocess, sys
 from pathlib import Path
 
 from . import render
@@ -81,15 +82,17 @@ def script_choose_folder():
         'return POSIX path of (choose folder with prompt "Folder for the PNGs")'])
 
 
+def done_text(n, errors):
+    return f'Rendered {n} PNG{"" if n == 1 else "s"}.' + ('\n\n' + '\n'.join(errors) if errors else '')
+
+
 def script_done(n, errors):
-    text = f'Rendered {n} PNG{"" if n == 1 else "s"}.'
-    if errors:
-        text += '\n\n' + '\n'.join(errors)
     buttons = '{"OK", "Show in Finder"}' if n else '{"OK"}'
     default = '"Show in Finder"' if n else '"OK"'
     return '\n'.join([
         'activate',
-        f'set r to display dialog {q(text)} with title "Plot Look" buttons {buttons} default button {default}',
+        f'set r to display dialog {q(done_text(n, errors))} with title "Plot Look" buttons {buttons} '
+        f'default button {default}',
         'return button returned of r'])
 
 
@@ -103,8 +106,51 @@ def osa(script):
     return r.stdout.strip()
 
 
+class AppleScript:
+    """the dialogs as standard AppleScript ones through osascript"""
+
+    def choose_files(self):
+        """the files chosen, [] on cancel"""
+        return [l for l in (osa(script_choose_files()) or '').splitlines() if l.strip()]
+
+    def choose(self, items, prompt, default=None, ok='OK', cancel='Cancel'):
+        """the item chosen, or None on cancel"""
+        return osa(script_list(items, prompt, default, ok, cancel)) or None
+
+    def choose_many(self, items, prompt, ok='OK'):
+        """the items chosen, [] on cancel"""
+        return [l for l in (osa(script_list(items, prompt, ok=ok, multiple=True)) or '').splitlines() if l]
+
+    def ask(self, prompt, answer=''):
+        """the text, or None on cancel"""
+        return osa(script_ask(prompt, answer))
+
+    def confirm(self, text, button):
+        return osa(script_confirm(text, button)) is not None
+
+    def choose_folder(self):
+        """the folder's path, or None on cancel"""
+        return osa(script_choose_folder())
+
+    def done(self, n, errors):
+        """the count and any errors; True for Show in Finder"""
+        return osa(script_done(n, errors)) == 'Show in Finder'
+
+    def progress(self, text):
+        pass
+
+    def work(self, fn):
+        return fn()
+
+
 def reveal(path):
-    subprocess.run(['open', '-R', str(path)])
+    """the file selected in Finder or Explorer, elsewhere its folder opened"""
+    if sys.platform == 'darwin':
+        subprocess.run(['open', '-R', str(path)])
+    elif sys.platform == 'win32':
+        subprocess.run(f'explorer /select,"{path}"')
+    else:
+        subprocess.run(['xdg-open', str(Path(path).parent)])
 
 
 def size_item(s):
@@ -121,17 +167,19 @@ def setting_value(s, k):
     if k == 'gain':
         return f'{s["gain"]:g} µm'
     if k == 'out':
-        return s['out'].replace(str(Path.home()), '~', 1) if s['out'] else BESIDE
+        if not s['out']:
+            return BESIDE
+        return s['out'] if sys.platform == 'win32' else s['out'].replace(str(Path.home()), '~', 1)
     return f'{s[k]:g}'
 
 
-def ask_number(k, current):
+def ask_number(d, k, current):
     """a number in NUMBERS[k]'s range from a text field, or None on cancel"""
     what, lo, hi, whole = NUMBERS[k]
     prompt = f'{what}, {lo:g} to {hi:g}:'
     answer = f'{current:g}'
     while True:
-        got = osa(script_ask(prompt, answer))
+        got = d.ask(prompt, answer)
         if got is None:
             return None
         try:
@@ -143,27 +191,27 @@ def ask_number(k, current):
         prompt, answer = f'{got} is not {"a whole number" if whole else "a number"} from {lo:g} to {hi:g}. {what}:', got
 
 
-def edit_setting(k, s, state):
+def edit_setting(d, k, s, state):
     """one dialog to change setting k in s; True if it changed"""
     if k in ('sharpen', 'contrast', 'gain'):
-        v = ask_number(k, s[k])
+        v = ask_number(d, k, s[k])
         if v is None:
             return False
         s[k] = v
         return True
     if k == 'paper':
-        got = osa(script_list([p.capitalize() for p in PAPERS], 'Paper', s['paper'].capitalize()))
+        got = d.choose([p.capitalize() for p in PAPERS], 'Paper', s['paper'].capitalize())
         if not got:
             return False
         s['paper'] = got.lower()
         return True
     if k == 'out':
-        got = osa(script_list([BESIDE, CHOOSE_FOLDER], 'Save the PNGs', CHOOSE_FOLDER if s['out'] else BESIDE))
+        got = d.choose([BESIDE, CHOOSE_FOLDER], 'Save the PNGs', CHOOSE_FOLDER if s['out'] else BESIDE)
         if not got:
             return False
         out = None
         if got == CHOOSE_FOLDER:
-            out = osa(script_choose_folder())
+            out = d.choose_folder()
             if not out:
                 return False
             out = out.rstrip('/') or '/'
@@ -172,12 +220,12 @@ def edit_setting(k, s, state):
         return True
     items = [*SIZE_ITEMS.values(), LONG_ITEM, DPI_ITEM]
     cur = size_item(s) if s['size'] else LONG_ITEM if s['long'] else DPI_ITEM
-    got = osa(script_list(items, 'Size of the PNGs', cur))
+    got = d.choose(items, 'Size of the PNGs', cur)
     if not got:
         return False
     if got in (LONG_ITEM, DPI_ITEM):
         k2 = 'long' if got == LONG_ITEM else 'dpi'
-        v = ask_number(k2, s[k2] or (3840 if k2 == 'long' else 300))
+        v = ask_number(d, k2, s[k2] or (3840 if k2 == 'long' else 300))
         if v is None:
             return False
         s.update(size=None, long=None, dpi=None)
@@ -187,11 +235,11 @@ def edit_setting(k, s, state):
     return True
 
 
-def ask_preset_name():
+def ask_preset_name(d):
     """a new or replaced preset's name, or None on cancel"""
     prompt, answer = 'Name for the preset (letters, digits and hyphens):', ''
     while True:
-        got = osa(script_ask(prompt, answer))
+        got = d.ask(prompt, answer)
         if got is None:
             return None
         got = got.strip()
@@ -199,41 +247,40 @@ def ask_preset_name():
         if err:
             prompt, answer = f'{err} Name for the preset:', got
             continue
-        if got in load_presets() and osa(script_confirm(f'Replace the preset {got}?', 'Replace')) is None:
+        if got in load_presets() and not d.confirm(f'Replace the preset {got}?', 'Replace'):
             continue
         return got
 
 
-def custom_menu(state):
+def custom_menu(d, state):
     """the Custom… settings; (settings, saved preset name or None), or None to go back"""
     s, name = base_settings(out=state.get('save_to')), None
     while True:
         rows = {f'{SETTING_NAMES[k]} — {setting_value(s, k)}': k for k in SETTING_NAMES}
-        got = osa(script_list([*rows, RENDER, SAVE_AS], 'Settings', RENDER, ok='Choose', cancel='Back'))
+        got = d.choose([*rows, RENDER, SAVE_AS], 'Settings', RENDER, ok='Choose', cancel='Back')
         if not got:
             return None
         if got == RENDER:
             return s, name
         if got == SAVE_AS:
-            n = ask_preset_name()
+            n = ask_preset_name(d)
             if n:
                 save_preset(n, s)
                 name = n
-        elif edit_setting(rows[got], s, state):
+        elif edit_setting(d, rows[got], s, state):
             name = None
 
 
-def remove_menu(saved):
-    got = osa(script_list(sorted(saved), 'Presets to remove', ok='Remove', multiple=True))
-    names = [l for l in (got or '').splitlines() if l]
+def remove_menu(d, saved):
+    names = d.choose_many(sorted(saved), 'Presets to remove', ok='Remove')
     if not names:
         return
     text = f'Remove the preset{"s" if len(names) > 1 else ""} {", ".join(names)}?'
-    if osa(script_confirm(text, 'Remove')):
+    if d.confirm(text, 'Remove'):
         remove_presets(names)
 
 
-def main_menu():
+def main_menu(d):
     """the list of presets, with Custom… and Remove a preset…; (settings, saved preset name or None), or None"""
     state = read_json(STATE)
     keys = {v: k for k, v in SIZE_ITEMS.items()}
@@ -241,14 +288,14 @@ def main_menu():
         saved = load_presets()
         items = [*SIZE_ITEMS.values(), *sorted(saved), CUSTOM] + ([REMOVE] if saved else [])
         last = {'custom': CUSTOM}.get(state.get('last'), SIZE_ITEMS.get(state.get('last'), state.get('last')))
-        got = osa(script_list(items, 'Size of the PNGs', last if last in items else items[0], ok='Render'))
+        got = d.choose(items, 'Size of the PNGs', last if last in items else items[0], ok='Render')
         if not got:
             return None
         if got == REMOVE:
-            remove_menu(saved)
+            remove_menu(d, saved)
             continue
         if got == CUSTOM:
-            picked = custom_menu(state)
+            picked = custom_menu(d, state)
             if not picked:
                 continue
             s, name = picked
@@ -262,27 +309,39 @@ def main_menu():
         return s, name
 
 
-def run_ui(files, opts):
-    """the dialogs: files (if none given), the settings, render, a count with Show in Finder; the PNGs written"""
+def run_ui(files, opts, d=None):
+    """the dialogs d (AppleScript's on macOS, else Tk's): files (if none given), the settings, render, a count with
+    Show in Finder; the PNGs written"""
+    if d is None:
+        if sys.platform == 'darwin':
+            d = AppleScript()
+        else:
+            from .tkdialogs import Tk
+            d = Tk()
     if not files:
-        got = osa(script_choose_files())
-        if not got:
+        files = d.choose_files()
+        if not files:
             return []
-        files = [l for l in got.splitlines() if l.strip()]
-    picked = main_menu()
+    picked = main_menu(d)
     if not picked:
         return []
     s, name = picked
     apply(opts, check(override(s, opts)), name)
-    pngs, errors = [], []
-    for f in files:
-        if Path(f).suffix.lower() not in ('.pdf', '.ai'):
-            errors.append(f'{Path(f).name}: not a PDF or .ai')
-            continue
-        try:
-            pngs += [w for w in render.run(f, opts) if w.suffix == '.png']
-        except (SystemExit, Exception) as e:
-            errors.append(f'{Path(f).name}: {e}')
-    if osa(script_done(len(pngs), errors)) == 'Show in Finder' and pngs:
+
+    def render_all():
+        pngs, errors = [], []
+        for i, f in enumerate(files):
+            if Path(f).suffix.lower() not in ('.pdf', '.ai'):
+                errors.append(f'{Path(f).name}: not a PDF or .ai')
+                continue
+            d.progress(Path(f).name + (f', {i + 1} of {len(files)}' if len(files) > 1 else ''))
+            try:
+                pngs += [w for w in render.run(f, opts) if w.suffix == '.png']
+            except (SystemExit, Exception) as e:
+                errors.append(f'{Path(f).name}: {e}')
+        return pngs, errors
+
+    pngs, errors = d.work(render_all)
+    if d.done(len(pngs), errors) and pngs:
         reveal(pngs[0])
     return pngs

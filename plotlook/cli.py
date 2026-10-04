@@ -30,6 +30,7 @@ EXAMPLES = '''examples:
   plotlook a.pdf --preset 4k --paper bond --jpeg
   plotlook --save-preset crisp --preset portfolio --sharpen 2
   plotlook a.pdf --preset crisp                 writes a-11x17-crisp.png
+  plotlook --ui                                 dialogs to choose drawings and a preset
   plotlook --make-app                           macOS: Plot Look.app, a droplet with dialogs
 '''
 
@@ -63,10 +64,11 @@ def parser(prog='plotlook'):
     p.add_argument('--save-preset', metavar='NAME', help='save the options given as a preset')
     p.add_argument('--remove-preset', metavar='NAME')
     p.add_argument('--presets', action='store_true', help='list the saved presets')
-    m = a.add_argument_group('macOS')
-    m.add_argument('--ui', action='store_true', help='dialogs: choose files (if none given) and a preset')
+    m = a.add_argument_group('dialogs')
+    m.add_argument('--ui', action='store_true', help='choose files (if none given) and a preset in dialogs: '
+                   'AppleScript ones on macOS, Tk ones elsewhere')
     m.add_argument('--make-app', nargs='?', const='', metavar='DIR',
-                   help='write Plot Look.app (default /Applications), a droplet that runs --ui')
+                   help='macOS: write Plot Look.app (default /Applications), a droplet that runs --ui')
     a.add_argument('--tile', type=int, default=TILE, help=argparse.SUPPRESS)
     a.add_argument('--workers', type=int, default=WORKERS, help=argparse.SUPPRESS)
     return a
@@ -76,8 +78,8 @@ def main(argv=None, host=None):
     prog = getattr(host, 'prog', None) or 'plotlook'
     opts = parser(prog).parse_args(sys.argv[1:] if argv is None else argv)
     opts.host = host
-    if (opts.ui or opts.make_app is not None) and sys.platform != 'darwin':
-        raise SystemExit(f'{prog}: --ui and --make-app are macOS only; elsewhere run {prog} FILE.pdf ...')
+    if opts.make_app is not None and sys.platform != 'darwin':
+        raise SystemExit(f'{prog}: --make-app is macOS only; elsewhere run {prog} --ui, or {prog} FILE.pdf ...')
     if opts.make_app is not None:
         from .app import make_app
         make_app(opts.make_app or None, getattr(host, 'app_command', None))

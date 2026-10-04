@@ -13,6 +13,7 @@ jobs:
           - { os: ubuntu-24.04, python: "3.10" }
           - { os: ubuntu-24.04, python: "3.13" }
           - { os: macos-15, python: "3.13" }
+          - { os: windows-2025, python: "3.13" }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -21,7 +22,23 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: poppler
+        if: runner.os != 'Windows'
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update -q && sudo apt-get install -y -q poppler-utils; else brew install poppler; fi
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update -q && sudo apt-get install -y -q poppler-utils xvfb; else brew install poppler; fi
+      - id: poppler
+        if: runner.os == 'Windows'
+        uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: poppler
+          create-args: poppler
+          init-shell: none
+          post-cleanup: none
+      - name: poppler on the PATH
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "${{ steps.poppler.outputs.environment-path }}/Library/bin" >> "$GITHUB_PATH"
       - run: pip install '.[test]'
-      - run: pytest -q
+      - name: pytest
+        shell: bash
+        # a display for the Tk dialogs' tests on Linux
+        run: if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a pytest -q; else pytest -q; fi

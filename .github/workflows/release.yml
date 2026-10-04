@@ -1,0 +1,75 @@
+name: release
+
+# the downloadable apps, built on each platform by packaging/build.py: a tag vX.Y.Z (plotlook.__version__) attaches
+# them to that release, creating it if need be; a run by hand keeps them as the run's artifacts
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, name: mac-apple-silicon, numpy: macosx_11_0_arm64 }
+          - { os: macos-15-intel, name: mac-intel, numpy: macosx_10_13_x86_64 }
+          - { os: windows-2025, name: windows }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - id: poppler
+        uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: poppler
+          create-args: poppler
+          init-shell: none
+          post-cleanup: none
+      - name: python packages
+        shell: bash
+        # on macOS, numpy's wheel for the oldest macOS it has; pip would take the one for macOS 14
+        run: |
+          python -m pip install -q pyinstaller pillow
+          if [ -n "${{ matrix.numpy }}" ]; then
+            python -m pip download -q numpy --only-binary=:all: --no-deps --platform ${{ matrix.numpy }} -d wheels
+            python -m pip install -q wheels/numpy-*.whl
+          else
+            python -m pip install -q numpy
+          fi
+      - name: build
+        shell: bash
+        run: python packaging/build.py "${{ steps.poppler.outputs.environment-path }}" --name ${{ matrix.name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/Plot-Look-*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n "s/^__version__ = '\(.*\)'/\1/p" plotlook/__init__.py)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "the tag $GITHUB_REF_NAME is not plotlook.__version__, $version"; exit 1
+          fi
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --title "plot look $version" --notes-file packaging/release-notes.md
+          gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber

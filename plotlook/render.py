@@ -32,6 +32,7 @@ WORKERS = 3
 NUDGE = (0, 0.05, 0.1, 0.2, -0.05, -0.2, 0.5)   # dpi added in turn when pdftoppm leaves out a tiling pattern; across a
                                                 # 2400 px tile at 600 dpi that drifts 0.2 px at 0.05, 2 px at 0.5
 STRIP = 1024                      # output rows encoded at a time
+NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)   # windows: no console window for each pdftoppm under a gui
 PAPERS = {'white': dict(paper=(1.0,), toner=0.0),
           'bond': dict(paper=(0.955, 0.94, 0.905), toner=0.06)}   # linear reflectance, r g b
 PRESETS = {'portfolio': 'fit into 11 x 17 in at 300 dpi', '4k': 'fit into 3840 x 2160 px',
@@ -84,7 +85,8 @@ def expand(paths):
 def pages(pdf):
     """each page's (width, height) in points as pdftoppm renders it: the media box, turned by its rotation"""
     def info(*a):
-        r = subprocess.run(['pdfinfo', *a, str(pdf)], capture_output=True, text=True)
+        r = subprocess.run(['pdfinfo', *a, str(pdf)], capture_output=True, encoding='utf-8', errors='replace',
+                           creationflags=NO_WINDOW)
         if r.returncode:
             raise SystemExit(f'poppler cannot read {pdf} (an .ai must be saved with PDF compatibility): '
                              f'{r.stderr.strip()[-200:]}')
@@ -185,7 +187,7 @@ def render_tile(pdf, page, dpi, x, y, w, h, tmp):
     args = ['pdftoppm', '-r', str(dpi), '-f', str(page), '-l', str(page), '-singlefile', '-gray',
             '-aa', 'no', '-aaVector', 'no', '-thinlinemode', 'solid',
             '-x', str(x), '-y', str(y), '-W', str(w), '-H', str(h), str(pdf), str(stem)]
-    r = subprocess.run(args, capture_output=True, text=True)
+    r = subprocess.run(args, capture_output=True, encoding='utf-8', errors='replace', creationflags=NO_WINDOW)
     if 'Bogus memory allocation' in r.stderr:
         Path(f'{stem}.pgm').unlink(missing_ok=True)
         raise TileTooBig

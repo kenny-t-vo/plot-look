@@ -6,6 +6,10 @@ It models one device, a 600 dpi toner plotter, calibrated on one machine. It is 
 
 ![A test sheet: a plain export above, plot look below, both at 150 dpi](docs/demo.png)
 
+## Download
+
+The [latest release](https://github.com/kenny-t-vo/plot-look/releases/latest) has plot look as an app for Mac, Apple silicon or Intel, and for Windows. Each holds its own Python and poppler, so it needs no install and no terminal: drop PDFs on the app, or open it to choose them, then pick a size. The apps aren't signed, so macOS and Windows each ask once before the first open; the release's notes say what to click.
+
 ## Install
 
 Python 3.10 or later, and poppler:
@@ -28,8 +32,9 @@ plotlook a.pdf --preset 4k --paper bond --jpeg
 
 - **Presets.** `portfolio` (the default) fits the page into 11 x 17 in at 300 dpi, `4k` into 3840 x 2160 px and `1440p` into 2560 x 1440 px, each turned to match the page. `plot` is the page at its own size at 300 dpi. `--long PX` and `--dpi N` set a size directly.
 - **Names.** Files are named `STEM[-pN]-SIZE[-NAME][-bond][-crop-…].png` and replace a file of the same name.
-- **Saved presets.** `--save-preset NAME` saves the options given under a name, and `--preset NAME` uses them; any option you also give overrides the saved one. `--presets` lists them and `--remove-preset NAME` removes one. They're kept in `~/Library/Application Support/Plot Look/`, or in the folder `PLOTLOOK_HOME` names.
-- **macOS app.** `plotlook --make-app` writes `Plot Look.app` to `/Applications`. Drop PDFs on it, or open it to choose them, then pick a preset or set your own values. `Custom…` lists the settings and can save them as a preset. Saved presets are removed with `Remove a preset…`, since standard dialogs take no right-click.
+- **Saved presets.** `--save-preset NAME` saves the options given under a name, and `--preset NAME` uses them; any option you also give overrides the saved one. `--presets` lists them and `--remove-preset NAME` removes one. They're kept in `~/Library/Application Support/Plot Look/` (on Windows `%APPDATA%\Plot Look`), or in the folder `PLOTLOOK_HOME` names.
+- **Dialogs.** `plotlook --ui` asks for the drawings, when none are given, and a preset or your own values, in AppleScript dialogs on macOS and a Tk window elsewhere; the downloadable apps take the same steps in the Tk window. `Custom…` lists the settings and can save them as a preset. Saved presets are removed with `Remove a preset…`, since standard dialogs take no right-click.
+- **macOS app.** `plotlook --make-app` writes `Plot Look.app` to `/Applications`, a droplet that runs `--ui` with this install: drop PDFs on it, or open it to choose them.
 
 `plotlook --help` lists every option.
 
@@ -49,6 +54,10 @@ Measured on a Canon ColorWave 3600, a 600 dpi toner plotter:
 - **The sharpen and contrast defaults** were set against photographs of plots taken from 2 to 5 ft.
 
 Another plotter may need its own `--gain` and `--device-dpi`.
+
+## Building the apps
+
+`packaging/build.py` builds the app for the machine it runs on with PyInstaller, adds pdftoppm and pdfinfo from a conda-forge environment holding poppler, renders a test page through the app and zips it. The release workflow runs it on macOS (Apple silicon and Intel) and Windows for a tag `vX.Y.Z` and attaches the zips to that release.
 
 ## License
 
