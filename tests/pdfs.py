@@ -59,6 +59,23 @@ def hatch(wt, w=72, h=72):
     return (f'/G0 gs 0 G {wt} w ' + ' '.join(f'{x:.3f} 0 m {x:.3f} {h} l S' for x in xs)).encode()
 
 
+def pattern_pdf(path, w=216, h=144, cell=36, turn=30):
+    """a w x h pt page filled with a tiling pattern: a hatch of 0.05 pt lines at 2 pt pitch, cell pt square, turned
+    turn degrees"""
+    import math
+    c, s = math.cos(math.radians(turn)), math.sin(math.radians(turn))
+    lines = b'0 G 0.05 w ' + b' '.join(b'0 %.2f m %d %.2f l S' % (y, cell, y) for y in [1 + 2 * i for i in range(cell // 2)])
+    content = b'/Pattern cs /P0 scn 0 0 %d %d re f' % (w, h)
+    return mini_pdf(path, [
+        b'<< /Type /Catalog /Pages 2 0 R >>', b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %d %d] /Resources << /Pattern << /P0 5 0 R >> >> '
+        b'/Contents 4 0 R >>' % (w, h),
+        b'<< /Length %d >>\nstream\n' % len(content) + content + b'\nendstream',
+        b'<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 %d %d] /XStep %d /YStep %d '
+        b'/Matrix [%.6f %.6f %.6f %.6f 0 0] /Resources << >> /Length %d >>\nstream\n'
+        % (cell, cell, cell, cell, c, s, -s, c, len(lines)) + lines + b'\nendstream'])
+
+
 def mix_pdf(path):
     """two 3 x 2 in pages: a hatch, a grey box, a diagonal and a hairline"""
     return page_pdf(path, hatch(0.05, 216, 144) + b' 0.6 g 20 20 80 50 re f 0 G 0.4 w 0 0 m 216 144 l S 0.02 w '

@@ -1,7 +1,7 @@
 import numpy as np
 
 from plotlook import render
-from pdfs import hatch, mix_pdf, needs, page_pdf
+from pdfs import hatch, mix_pdf, needs, page_pdf, pattern_pdf
 
 
 def test_sizes():
@@ -60,3 +60,20 @@ def test_tiles(tmp_path):
     whole = render.device_reduce(mix, 1, 600, (0, 0, W, H), 3, gain, tile=100000, workers=1)
     tiled = render.device_reduce(mix, 1, 600, (0, 0, W, H), 3, gain, tile=97, workers=4)
     assert whole.shape == tiled.shape == (H // 3, W // 3) and float(np.abs(whole - tiled).max()) < 1e-5
+
+
+@needs('pdftoppm')
+def test_patterns(tmp_path):
+    """a hatch turned 30 degrees as a tiling pattern prints the same in one tile for the whole page, from the copy
+    vector_patterns writes, as in 97 px tiles, where poppler draws each cell as vectors (from the file as it is, a
+    whole-page tile prints it at about a fifth of that); a file without tiling patterns is rendered from itself"""
+    f = pattern_pdf(tmp_path / 'pattern.pdf')
+    gain = render.GAIN_UM / (25400 / 600)
+    W, H = render.device_px(216, 600), render.device_px(144, 600)
+    small = render.device_reduce(f, 1, 600, (0, 0, W, H), 3, gain, tile=97, workers=4)
+    vec = render.vector_patterns(f, tmp_path, W + 3 + 2 * render.margin(gain), 599)
+    whole = render.device_reduce(vec, 1, 600, (0, 0, W, H), 3, gain, tile=100000, workers=1)
+    assert vec != f and abs(float(whole.mean()) - float(small.mean())) < 0.02 * float(small.mean()), \
+        (float(whole.mean()), float(small.mean()))
+    mix = mix_pdf(tmp_path / 'mix.pdf')
+    assert render.vector_patterns(mix, tmp_path, 2400, 600) == mix

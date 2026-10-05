@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-dependencies = ["numpy", "Pillow"]
+dependencies = ["numpy", "Pillow", "pypdf>=5"]
 
 [project.optional-dependencies]
 test = ["pytest"]

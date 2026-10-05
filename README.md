@@ -41,6 +41,7 @@ plotlook a.pdf --preset 4k --paper bond --jpeg
 ## How it works
 
 1. Renders the page with pdftoppm at the plotter's 600 dpi, with no anti-aliasing, so every line under a pixel prints a pixel wide.
+   Tiling patterns (pattern swatches) are drawn cell by cell as vectors: left to itself, poppler resamples a rasterised cell into place wherever a tile of the page holds more than four cells, which turns a fine rotated hatch to grey in some tiles and not others.
 2. Spreads the toner: coverage grows about 33 µm at each edge, so a fine line widens, a flat grey keeps its grey and a solid stays solid.
 3. Averages down to the output size in linear light, so a field of fine marks keeps the tone it has on paper.
 4. Applies an unsharp mask on darkness (`--sharpen`, 1.5) and a gamma on coverage (`--contrast`, 0.85), for how the plot reads from a few feet away.

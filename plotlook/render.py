@@ -6,6 +6,13 @@
    pixel on a dense 42 x 56 in sheet). At some resolutions and tiles poppler 26.04 prints "Bogus memory allocation
    size" and leaves a tiling pattern out (a black hatch at 600 dpi in a 12600 px wide tile). Such a tile is rendered
    again at a resolution nudged by NUDGE, its origin scaled to match, and failing those, in quarters.
+   Tiling patterns (pattern swatches): where a tile needs more than 4 cells of a pattern whose step equals its
+   bounding box, poppler rasterises one cell and resamples it into place, which greys and breaks the thin lines of a
+   rotated hatch (to a fifth of their cover), and otherwise draws each cell as vectors, so the same hatch printed in
+   one tile and turned to grey mush in the next. Tiles are drawn from a copy of the file (an incremental update
+   written with pypdf) in which each pattern's bounding box is 0.001 pt wider than its step, which poppler draws cell
+   by cell in every tile. A pattern of more than CELLS cells in a tile, and a file pypdf cannot read, are rendered as
+   they are.
 2. toner spread: coverage c (0 to 1) becomes c + g (max3x3(c) - c), g = gain / pixel (33 um at 600 dpi: 0.78), in
    ceil(g) passes over 1. A flat grey keeps its grey, a line widens by about a gain an edge, a solid stays solid.
 3. downsample in linear light: integer block means of coverage per tile, then one Lanczos resize to the output size.
@@ -37,6 +44,8 @@ WORKERS = 3
 NUDGE = (0, 0.05, 0.1, 0.2, -0.05, -0.2, 0.5)   # dpi added in turn when pdftoppm leaves out a tiling pattern; across a
                                                 # 2400 px tile at 600 dpi that drifts 0.2 px at 0.05, 2 px at 0.5
 STRIP = 1024                      # output rows encoded at a time
+CELLS = 250000                    # a tiling pattern's cells in a tile at most for poppler to draw them one by one (about
+                                  # 10 us a cell); finer ones are left to its raster path
 COLOUR_PX = 6000                  # the colour render's long side at most; colour is resized up past it
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)   # windows: no console window for each pdftoppm under a gui
 PAPERS = {'white': dict(paper=(1.0,), toner=0.0),
@@ -107,6 +116,66 @@ def pages(pdf):
         w, h = abs(x1 - x0), abs(y1 - y0)
         sizes.append((h, w) if rot.get(p, 0) % 180 else (w, h))
     return sizes
+
+
+def vector_patterns(src, tmp, side_px, dpi, log=None):
+    """src, or a copy of it in tmp where each tiling pattern's bounding box is 0.001 pt wider than its step, which
+    poppler draws cell by cell as vectors; a pattern of more than CELLS cells in a tile side_px square at dpi is left
+    as it is"""
+    try:
+        from pypdf import PdfWriter
+        from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject
+    except ImportError:
+        if log:
+            log('  pypdf is not installed, so tiling patterns may render differently from tile to tile')
+        return src
+    side = side_px * 72 / dpi
+
+    def widen(p):
+        a, b, c, d = [float(v) for v in (p.get('/Matrix') or [1, 0, 0, 1])[:4]]
+        det = abs(a * d - b * c)
+        sx, sy = abs(float(p['/XStep'])), abs(float(p['/YStep']))
+        x0, y0, x1, y1 = [float(v) for v in p['/BBox']]
+        if not det or (sx, sy) != (x1 - x0, y1 - y0):      # poppler draws these cell by cell already
+            return False
+        # cells along the pattern's axes in a tile, the matrix inverted
+        if (side * (abs(d) + abs(c)) / det / sx + 2) * (side * (abs(b) + abs(a)) / det / sy + 2) > CELLS:
+            return False
+        p[NameObject('/BBox')] = ArrayObject(FloatObject(v) for v in (x0, y0, x1 + 0.001, y1))
+        return True
+
+    try:
+        w = PdfWriter(str(src), incremental=True)
+        seen, n = set(), 0
+
+        def walk(res):
+            nonlocal n
+            res = res.get_object() if res is not None else None
+            if not isinstance(res, dict):
+                return
+            for kind in ('/Pattern', '/XObject'):
+                for ref in (res.get(kind) or DictionaryObject()).get_object().values():
+                    obj = ref.get_object()
+                    key = getattr(ref, 'idnum', None) or id(obj)
+                    if key in seen or not isinstance(obj, dict):
+                        continue
+                    seen.add(key)
+                    walk(obj.get('/Resources'))
+                    if kind == '/Pattern' and obj.get('/PatternType') == 1 and widen(obj):
+                        n += 1
+
+        for page in w.pages:
+            walk(page.get('/Resources'))
+        if not n:
+            return src
+        out = Path(tmp) / f'{Path(src).stem}-patterns.pdf'
+        with open(out, 'wb') as f:
+            w.write(f)
+        return out
+    except Exception as e:              # pypdf cannot read or write the file (damaged, encrypted): render it as it is
+        if log:
+            log(f'  tiling patterns left as they are, since pypdf could not rewrite them: {e}')
+        return src
 
 
 def device_px(pt, dpi):
@@ -250,11 +319,16 @@ def render_tile(pdf, page, dpi, x, y, w, h, tmp):
     return 1.0 - a.astype(np.float32) / 255.0
 
 
+def margin(gain_px):
+    """px rendered around a tile for the toner spread to read"""
+    return max(2, math.ceil(gain_px - 1e-9) + 1)
+
+
 def device_reduce(pdf, page, dpi, region, k, gain_px, tile=TILE, workers=WORKERS, log=None):
     """the page's region (x0, y0, w, h in device px) rendered as it prints, spread, and averaged in k x k blocks"""
     import numpy as np
     x0, y0, W, H = region
-    ov = max(2, math.ceil(gain_px - 1e-9) + 1)
+    ov = margin(gain_px)
     out = np.zeros((-(-H // k), -(-W // k)), np.float32)
     nx, ny = -(-W // tile), -(-H // tile)
     tw, th = -(-(-(-W // nx)) // k) * k, -(-(-(-H // ny)) // k) * k     # k-aligned tile sides
@@ -372,9 +446,8 @@ def plotlook(src, opts, log=stderr_log, write=write_file, device_dpi=None):
     gain_px = opts.gain / (25400 / dev_dpi)
     sizes = pages(src)
     dest = Path(opts.out).absolute() if opts.out else src.parent
-    written = []
+    jobs = []
     for p in parse_pages(opts.pages, len(sizes)):
-        t0 = time.time()
         wpt, hpt = sizes[p - 1]
         Wd, Hd = device_px(wpt, dev_dpi), device_px(hpt, dev_dpi)
         if opts.crop:
@@ -388,25 +461,33 @@ def plotlook(src, opts, log=stderr_log, write=write_file, device_dpi=None):
             region, w_in, h_in = (0, 0, Wd, Hd), wpt / 72, hpt / 72
         ow, oh, odpi = out_size(w_in, h_in, opts.preset, opts.long, opts.dpi)
         k = max(1, int(min(region[2] / ow, region[3] / oh) + 1e-9))
-        cov = device_reduce(src, p, dev_dpi, region, k, gain_px, opts.tile, opts.workers, log)
-        img = finish(cov, (ow, oh), opts.paper, opts.sharpen, opts.contrast)
-        del cov
-        if getattr(opts, 'colour', False):
-            reg_in = (region[0] / dev_dpi, region[1] / dev_dpi, w_in, h_in)
-            with tempfile.TemporaryDirectory(prefix='plotlook-') as tmp:
+        jobs.append((p, region, w_in, h_in, ow, oh, odpi, k))
+    written = []
+    with tempfile.TemporaryDirectory(prefix='plotlook-') as tmp:
+        # a tile is at most opts.tile px, rounded up to whole blocks of k, with its margin on both sides; the nudged
+        # resolutions are within 1 dpi of dev_dpi
+        side = opts.tile + max(j[7] for j in jobs) + 2 * margin(gain_px)
+        tiles_src = vector_patterns(src, tmp, side, dev_dpi - 1, log)
+        for p, region, w_in, h_in, ow, oh, odpi, k in jobs:
+            t0 = time.time()
+            cov = device_reduce(tiles_src, p, dev_dpi, region, k, gain_px, opts.tile, opts.workers, log)
+            img = finish(cov, (ow, oh), opts.paper, opts.sharpen, opts.contrast)
+            del cov
+            if getattr(opts, 'colour', False):
+                reg_in = (region[0] / dev_dpi, region[1] / dev_dpi, w_in, h_in)
                 img = tinted(img, colour_layer(src, p, reg_in, (ow, oh), tmp))
-        png = dest / out_name(src.stem, p, len(sizes), opts)
-        im = Image.fromarray(img)
-        buf = io.BytesIO()
-        im.save(buf, 'PNG', dpi=(odpi, odpi))
-        written.append(write(buf.getvalue(), png))
-        if opts.jpeg:
+            png = dest / out_name(src.stem, p, len(sizes), opts)
+            im = Image.fromarray(img)
             buf = io.BytesIO()
-            im.save(buf, 'JPEG', quality=92, dpi=(odpi, odpi))
-            written.append(write(buf.getvalue(), png.with_suffix('.jpg')))
-        if log:
-            log(f'{png}  {ow} x {oh} px at {odpi:g} dpi, device {region[2]} x {region[3]} px in blocks of {k}, '
-                f'{time.time() - t0:.0f} s')
+            im.save(buf, 'PNG', dpi=(odpi, odpi))
+            written.append(write(buf.getvalue(), png))
+            if opts.jpeg:
+                buf = io.BytesIO()
+                im.save(buf, 'JPEG', quality=92, dpi=(odpi, odpi))
+                written.append(write(buf.getvalue(), png.with_suffix('.jpg')))
+            if log:
+                log(f'{png}  {ow} x {oh} px at {odpi:g} dpi, device {region[2]} x {region[3]} px in blocks of {k}, '
+                    f'{time.time() - t0:.0f} s')
     return written
 
 

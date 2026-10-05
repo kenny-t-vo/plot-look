@@ -34,7 +34,7 @@ jobs:
         shell: bash
         # on macOS, numpy's wheel for the oldest macOS it has; pip would take the one for macOS 14
         run: |
-          python -m pip install -q pyinstaller pillow
+          python -m pip install -q pyinstaller pillow pypdf
           if [ -n "${{ matrix.numpy }}" ]; then
             python -m pip download -q numpy --only-binary=:all: --no-deps --platform ${{ matrix.numpy }} -d wheels
             python -m pip install -q wheels/numpy-*.whl
