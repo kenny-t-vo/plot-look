@@ -1,3 +1,5 @@
+New in 0.3.0: the app is one window holding every setting, Colour among them, with a progress bar and Stop; only Render starts a render. Pattern swatches now render evenly, where a fine rotated hatch used to turn to grey mush at the edge of one of the tiles a page is rendered in.
+
 Plot look as an app for Mac and Windows, holding its own Python and poppler, so there is nothing to install and no terminal to use. Download the zip for your computer from the assets below:
 
 - `mac-apple-silicon`: a Mac with an M1 or later chip
