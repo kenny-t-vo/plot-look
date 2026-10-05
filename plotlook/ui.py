@@ -17,8 +17,8 @@ from .presets import (DEFAULTS, apply, base_settings, check, from_saved, load_pr
 from .render import ALIASES, PAPERS, PRESETS
 
 MAC, WIN = sys.platform == 'darwin', sys.platform == 'win32'
-SIZE_ITEMS = {'portfolio': 'Portfolio · 11 × 17 in, 300 dpi', '4k': 'Web 4K', '1440p': 'Web 1440p',
-              'plot': 'Plot size · 300 dpi'}
+SIZE_ITEMS = {'portfolio': 'Portfolio · 11 × 17 in, 300 dpi', '4k': 'Web 4K · fits 3840 × 2160',
+              '1440p': 'Web 1440p · fits 2560 × 1440', 'plot': 'Plot size · 300 dpi'}
 NUMBERS = {'sharpen': ('Sharpen', 0, 2, False), 'contrast': ('Contrast', 0.1, 3, False),
            'gain': ('Toner spread', 0, 100, False), 'long': ('Long edge', 100, 30000, True),
            'dpi': ('Resolution', 10, 1200, False)}
