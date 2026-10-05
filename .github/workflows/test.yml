@@ -40,5 +40,5 @@ jobs:
       - run: pip install '.[test]'
       - name: pytest
         shell: bash
-        # a display for the Tk dialogs' tests on Linux
+        # a display for the Tk window's tests on Linux
         run: if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a pytest -q; else pytest -q; fi

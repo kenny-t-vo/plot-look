@@ -1,7 +1,7 @@
 """--make-app: Plot Look.app (macOS), an AppleScript droplet compiled with osacompile that runs `COMMAND --ui` with
-the files dropped on it, or with none on a double-click. COMMAND is baked in: by default this Python with
--m plotlook. The app sets a PATH holding Homebrew's and ~/.local/bin, where poppler and uv usually are, and logs to
-~/Library/Logs/plot-look.log.
+the files dropped on it, or with none on a double-click, which opens the window (ui.py). COMMAND is baked in: by
+default this Python with -m plotlook, which must have tkinter. The app sets a PATH holding Homebrew's and
+~/.local/bin, where poppler and uv usually are, and logs to ~/Library/Logs/plot-look.log.
 """
 import os, shlex, shutil, subprocess, sys
 from pathlib import Path
@@ -45,6 +45,12 @@ def make_app(folder=None, command=None):
     """write Plot Look.app into folder (default /Applications, else ~/Applications); its path"""
     if sys.platform != 'darwin':
         raise SystemExit('plotlook: --make-app is macOS only')
+    try:
+        import tkinter  # noqa: F401
+    except ImportError:
+        raise SystemExit(f'plotlook: --make-app needs a Python with tkinter, for the window the app opens, and '
+                         f'{sys.executable} has none (python.org\'s installers include it; with Homebrew, '
+                         f'brew install python-tk)')
     if folder:
         folder = Path(folder).expanduser().absolute()
     else:

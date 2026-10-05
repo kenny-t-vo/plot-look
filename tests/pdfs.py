@@ -1,4 +1,4 @@
-"""helpers for the tests: small PDFs written by hand, tools a test needs, and the dialogs stubbed"""
+"""helpers for the tests: small PDFs written by hand, tools a test needs, and the Tk the windows open in"""
 import contextlib, os, shutil, sys
 from pathlib import Path
 
@@ -27,6 +27,18 @@ def needs_window(f):
     except ImportError:
         ok = False
     return f if ok else needs('Tk windows')(f)
+
+
+ROOT = []
+
+
+def tk_root():
+    """one hidden Tk for every window the tests open (on Windows a second Tk in a process could not find init.tcl)"""
+    if not ROOT:
+        import tkinter
+        ROOT.append(tkinter.Tk())
+        ROOT[0].withdraw()
+    return ROOT[0]
 
 
 def mini_pdf(path, objs):
@@ -94,17 +106,3 @@ def env(**values):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-
-
-@contextlib.contextmanager
-def dialogs(answers):
-    """osascript stubbed: each dialog's script goes into said and gets the next answer; Show in Finder into shown"""
-    from plotlook import ui
-    said, shown, it = [], [], iter(answers)
-    osa0, reveal0 = ui.osa, ui.reveal
-    ui.osa = lambda s: (said.append(s), next(it))[1]
-    ui.reveal = shown.append
-    try:
-        yield said, shown
-    finally:
-        ui.osa, ui.reveal = osa0, reveal0

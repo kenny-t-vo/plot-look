@@ -5,9 +5,9 @@ portfolio fits the page (or the crop) into 11 x 17 in at 300 dpi, turned to matc
 --long PX and --dpi N set a size, over a preset's. The dpi written is the pixels an inch of the size the image stands
 for. --crop takes inches from the page's top left.
 
-Output goes beside the input, or into --out, as STEM[-pN]-SIZE[-NAME][-bond][-crop-X0-Y0-X1-Y1].png: -pN when the
-document has several pages; SIZE 11x17, 4k, 1440p, 300dpi (plot), NNNNpx (--long) or NNNdpi (--dpi); NAME a saved
-preset's. A file of that name is overwritten.
+Output goes beside the input, or into --out, as STEM[-pN]-SIZE[-NAME][-bond][-colour][-crop-X0-Y0-X1-Y1].png: -pN
+when the document has several pages; SIZE 11x17, 4k, 1440p, 300dpi (plot), NNNNpx (--long) or NNNdpi (--dpi); NAME a
+saved preset's. A file of that name is overwritten.
 
 --preset NAME takes a saved preset as well as the built-ins, and the options given override its values;
 --save-preset NAME saves the options in effect (then renders if files were given, named as with --preset NAME).
@@ -30,8 +30,8 @@ EXAMPLES = '''examples:
   plotlook a.pdf --preset 4k --paper bond --jpeg
   plotlook --save-preset crisp --preset portfolio --sharpen 2
   plotlook a.pdf --preset crisp                 writes a-11x17-crisp.png
-  plotlook --ui                                 dialogs to choose drawings and a preset
-  plotlook --make-app                           macOS: Plot Look.app, a droplet with dialogs
+  plotlook --ui                                 a window to choose drawings and settings
+  plotlook --make-app                           macOS: Plot Look.app, a droplet that opens the window
 '''
 
 
@@ -59,16 +59,17 @@ def parser(prog='plotlook'):
     o = a.add_argument_group('output')
     o.add_argument('--out', metavar='DIR', help='folder for the PNGs (default beside each PDF)')
     o.add_argument('--jpeg', action='store_true', help='also a quality 92 JPEG')
-    o.add_argument('--colour', '--color', action='store_true', dest='colour',
-                   help='keep the drawing\'s colours at the plotted tone (for screens; not a colour proof)')
+    o.add_argument('--colour', '--color', action=argparse.BooleanOptionalAction, dest='colour', default=None,
+                   help='keep the drawing\'s colours at the plotted tone (for screens; not a colour proof); '
+                   '--no-colour over a saved preset\'s')
     o.add_argument('-q', '--quiet', action='store_true', help='no progress lines')
     p = a.add_argument_group('presets')
     p.add_argument('--save-preset', metavar='NAME', help='save the options given as a preset')
     p.add_argument('--remove-preset', metavar='NAME')
     p.add_argument('--presets', action='store_true', help='list the saved presets')
-    m = a.add_argument_group('dialogs')
-    m.add_argument('--ui', action='store_true', help='choose files (if none given) and a preset in dialogs: '
-                   'AppleScript ones on macOS, Tk ones elsewhere')
+    m = a.add_argument_group('window')
+    m.add_argument('--ui', action='store_true', help='a window listing the files given, with every setting and '
+                   'Render; the options given fill its fields')
     m.add_argument('--make-app', nargs='?', const='', metavar='DIR',
                    help='macOS: write Plot Look.app (default /Applications), a droplet that runs --ui')
     a.add_argument('--tile', type=int, default=TILE, help=argparse.SUPPRESS)

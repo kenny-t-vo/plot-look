@@ -1,9 +1,9 @@
 """Saved presets and the settings they hold.
 
 A setting is a dict: one of size (a key of PRESETS), long (px) or dpi set, the others None; sharpen, contrast, paper,
-gain; out, a folder or None for beside each drawing. Saved presets live in presets.json in
-~/Library/Application Support/Plot Look (on Windows %APPDATA%\\Plot Look), or in $PLOTLOOK_HOME, as
-{NAME: {"size": KEY | "long": PX | "dpi": N, "sharpen", "contrast", "paper", "gain", "out"?}}.
+gain; out, a folder or None for beside each drawing; colour, True to keep the drawing's colours. Saved presets live in
+presets.json in ~/Library/Application Support/Plot Look (on Windows %APPDATA%\\Plot Look), or in $PLOTLOOK_HOME, as
+{NAME: {"size": KEY | "long": PX | "dpi": N, "sharpen", "contrast", "paper", "gain", "out"?, "colour": true?}}.
 """
 import json, os, re, sys
 from pathlib import Path
@@ -44,8 +44,8 @@ def load_presets():
     return read_json('presets.json')
 
 
-def base_settings(size='portfolio', out=None):
-    return dict(size=size, long=None, dpi=None, out=out, **DEFAULTS)
+def base_settings(size='portfolio', out=None, colour=False):
+    return dict(size=size, long=None, dpi=None, out=out, colour=colour, **DEFAULTS)
 
 
 def from_saved(d):
@@ -57,6 +57,7 @@ def from_saved(d):
     else:
         s['size'] = ALIASES.get(d.get('size', 'portfolio'), d.get('size', 'portfolio'))
     s.update({k: d[k] for k in DEFAULTS if k in d})
+    s['colour'] = bool(d.get('colour'))
     return s
 
 
@@ -65,6 +66,8 @@ def to_saved(s):
     d.update({k: s[k] for k in DEFAULTS})
     if s['out']:
         d['out'] = s['out']
+    if s.get('colour'):
+        d['colour'] = True
     return d
 
 
@@ -108,12 +111,13 @@ def remove_presets(names):
 def describe(s):
     size = s['size'] or (f'{s["long"]} px long' if s['long'] else f'{s["dpi"]:g} dpi')
     return (f'{size}, sharpen {s["sharpen"]:g}, contrast {s["contrast"]:g}, {s["paper"]} paper, '
-            f'toner spread {s["gain"]:g} um' + (f', into {s["out"]}' if s['out'] else ''))
+            f'toner spread {s["gain"]:g} um' + (', colour' if s.get('colour') else '')
+            + (f', into {s["out"]}' if s['out'] else ''))
 
 
 def override(s, opts):
     """the settings given on the command line over s"""
-    for k in (*DEFAULTS, 'out'):
+    for k in (*DEFAULTS, 'out', 'colour'):
         if getattr(opts, k, None) is not None:
             s[k] = getattr(opts, k)
     if s['out']:
@@ -140,7 +144,7 @@ def resolve(opts):
 
 def apply(opts, s, name):
     opts.preset, opts.long, opts.dpi = s['size'], s['long'], s['dpi']
-    for k in (*DEFAULTS, 'out'):
+    for k in (*DEFAULTS, 'out', 'colour'):
         setattr(opts, k, s[k])
     opts.preset_name = name
     return opts

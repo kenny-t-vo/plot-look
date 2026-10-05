@@ -1,76 +1,66 @@
 import contextlib, io, json, subprocess, sys
-from pathlib import Path
 
 from PIL import Image
 
 from plotlook import app, cli, presets, ui
-from pdfs import dialogs, mix_pdf, needs, page_pdf
+from pdfs import needs, needs_window, page_pdf
 
 
-def session(answers, files, *argv):
-    with dialogs(answers) as (said, shown), contextlib.redirect_stderr(io.StringIO()):
-        pngs = ui.run_ui([str(f) for f in files], cli.parser().parse_args([str(a) for a in argv]), ui.AppleScript())
-    return pngs, said, shown
+def run(*argv):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        cli.main([str(a) for a in argv])
+    return out.getvalue()
+
+
+def test_numbers():
+    """a field's number reads with a comma or a point, in its range, a whole one where it must be; anything else is
+    refused with the setting's name and range"""
+    got = [ui.number('1,5', 'sharpen'), ui.number(' 2000 ', 'long'), ui.number('72', 'dpi'), ui.number('100', 'gain')]
+    assert got == [1.5, 2000, 72.0, 100.0] and isinstance(got[1], int)
+    errors = []
+    for text, k in (('abc', 'sharpen'), ('2.5', 'sharpen'), ('0', 'contrast'), ('120.5', 'long'), ('', 'gain'),
+                    ('nan', 'dpi')):
+        try:
+            ui.number(text, k)
+        except ValueError as e:
+            errors.append(str(e))
+    assert errors == ['Sharpen: abc is not a number from 0 to 2', 'Sharpen: 2.5 is not a number from 0 to 2',
+                      'Contrast: 0 is not a number from 0.1 to 3',
+                      'Long edge: 120.5 is not a whole number from 100 to 30000',
+                      'Toner spread: nothing is not a number from 0 to 100',
+                      'Resolution: nan is not a number from 10 to 1200'], errors
 
 
 @needs('pdftoppm')
-def test_choose_files(tmp_path):
-    """--ui chooses files and a preset, renders, and shows the first PNG in Finder"""
-    mix, one = mix_pdf(tmp_path / 'mix.pdf'), page_pdf(tmp_path / 'one.pdf', b'0.75 g 0 0 72 72 re f')
-    pngs, said, shown = session([f'{mix}\n{one}\n', 'Web 4K', 'Show in Finder'], [], '--out', tmp_path / 'ui')
-    assert len(pngs) == 3 and 'choose file' in said[0] and 'choose from list' in said[1] and 'Rendered 3 PNGs' in said[2]
-    assert 'OK button name "Render"' in said[1] and 'default items {"Portfolio · 11 × 17 in, 300 dpi"}' in said[1]
-    assert 'Custom…' in said[1] and 'Remove a preset' not in said[1]
-    assert shown == [pngs[0]] and all(p.name.endswith('-4k.png') for p in pngs)
-
-
-@needs('pdftoppm')
-def test_custom_preset_session(tmp_path):
-    """Custom… changes the size, sharpen (a bad number asked again), paper and folder, saves them as a preset (a
-    built-in's name refused) and renders under its name; a second run offers the preset, selects it as the last
-    choice and overwrites the first run's file; Remove a preset… removes it after one confirmation"""
-    mix, folder = mix_pdf(tmp_path / 'mix.pdf'), tmp_path / 'renders'
-    folder.mkdir()
-    pngs, said, _ = session(['Custom…', 'Size — Portfolio · 11 × 17 in, 300 dpi', 'Web 1440p', 'Sharpen — 1.5', 'abc',
-                             '1.8', 'Paper — White', 'Bond', 'Save to — Beside each drawing', 'Choose folder…',
-                             f'{folder}/', 'Save as preset…', 'web', 'crisp', 'Render', 'OK'], [mix])
-    menu = [s for s in said if 'with prompt "Settings"' in s]
-    home = presets.home()
-    assert sorted(p.name for p in pngs) == ['mix-p1-1440p-crisp-bond.png', 'mix-p2-1440p-crisp-bond.png']
-    assert all(p.parent == folder for p in pngs) and Image.open(pngs[0]).size == (2160, 1440)
-    assert 'Sharpen, an unsharp mask on darkness, 0 to 2' in said[4] and 'abc is not a number from 0 to 2' in said[5]
-    assert 'built-in' in said[13] and 'Rendered 2 PNGs' in said[-1]
-    shown_folder = str(folder) if sys.platform == 'win32' else str(folder).replace(str(Path.home()), '~', 1)
-    for row in ('Size — Web 1440p', 'Sharpen — 1.8', 'Paper — Bond', 'Toner spread — 33 µm', f'Save to — {shown_folder}'):
-        assert app.q(row)[1:-1] in menu[-1], row
-    assert 'OK button name "Choose" cancel button name "Back"' in menu[0]
-    assert json.loads((home / 'presets.json').read_text()) == {'crisp': {
-        'size': '1440p', 'sharpen': 1.8, 'contrast': 0.85, 'paper': 'bond', 'gain': 33.0, 'out': str(folder)}}
-    assert json.loads((home / 'ui.json').read_text()) == {'save_to': str(folder), 'last': 'crisp'}
-
-    pngs[0].write_bytes(b'old')
-    again, said, shown = session(['crisp', 'Show in Finder'], [mix], '--pages', '1')
-    assert [p.name for p in again] == ['mix-p1-1440p-crisp-bond.png'] and again[0].parent == folder
-    assert Image.open(again[0]).size == (2160, 1440) and 'default items {"crisp"}' in said[0]
-    assert '"Remove a preset…"' in said[0] and shown == again
-
-    none, said, _ = session(['Remove a preset…', 'crisp', 'Remove', ''], [mix])
-    assert none == [] and 'with multiple selections allowed' in said[1] and 'Remove the preset crisp?' in said[2]
-    assert len(said) == 4 and '"crisp"' not in said[3] and 'Remove a preset' not in said[3]
-    assert presets.load_presets() == {} and 'default items {"Portfolio' in said[3]
+def test_colour_setting(tmp_path):
+    """--colour is saved in a preset as "colour": true (left out when off, so older presets read as before); the
+    preset renders in colour, --no-colour over it in grey, and the command line's default stays grey"""
+    pdf, o = page_pdf(tmp_path / 'x.pdf', b'0 0.85 0.95 0.1 k 0 0 72 72 re f'), tmp_path / 'o'
+    run('--save-preset', 'tinted', '--long', '100', '--colour')
+    run('--save-preset', 'plain', '--long', '100')
+    assert json.loads((presets.home() / 'presets.json').read_text()) == {
+        'tinted': {'long': 100, 'sharpen': 1.5, 'contrast': 0.85, 'paper': 'white', 'gain': 33.0, 'colour': True},
+        'plain': {'long': 100, 'sharpen': 1.5, 'contrast': 0.85, 'paper': 'white', 'gain': 33.0}}
+    assert run('--presets').splitlines() == ['plain  100 px long, sharpen 1.5, contrast 0.85, white paper, toner spread 33 um',
+                                             'tinted  100 px long, sharpen 1.5, contrast 0.85, white paper, toner spread 33 um, '
+                                             'colour']
+    run(pdf, '--preset', 'tinted', '--out', o, '-q')
+    run(pdf, '--preset', 'tinted', '--no-colour', '--out', o, '-q')
+    run(pdf, '--preset', 'plain', '--color', '--dpi', '50', '--out', o, '-q')
+    run(pdf, '--long', '120', '--out', o, '-q')
+    assert sorted(p.name for p in o.iterdir()) == ['x-100px-tinted-colour.png', 'x-100px-tinted.png', 'x-120px.png',
+                                                    'x-50dpi-plain-colour.png']
+    modes = {p.name: Image.open(p).mode for p in o.iterdir()}
+    assert modes == {'x-100px-tinted-colour.png': 'RGB', 'x-100px-tinted.png': 'L', 'x-120px.png': 'L',
+                     'x-50dpi-plain-colour.png': 'RGB'}
 
 
 @needs('osacompile', 'osadecompile')
-def test_applescript_and_app(tmp_path):
-    """the dialogs' AppleScript compiles, and Plot Look.app is a droplet running this Python with -m plotlook and a
-    PATH for Homebrew and ~/.local/bin"""
-    scripts = [ui.script_choose_files(), ui.script_list(['Web 4K', 'Toner spread — 33 µm'], 'Size', 'Web 4K', ok='Render'),
-               ui.script_list(['a', 'b'], 'Remove', ok='Remove', multiple=True), ui.script_ask('Sharpen, 0 to 2:', '1.5'),
-               ui.script_confirm('Remove a?', 'Remove'), ui.script_choose_folder(),
-               ui.script_done(2, ['x.pdf: "quoted" error']), ui.script_done(0, [])]
-    codes = [subprocess.run(['osacompile', '-o', str(tmp_path / f's{i}.scpt'), '-e', s], capture_output=True).returncode
-             for i, s in enumerate(scripts)]
-    assert codes == [0] * len(scripts)
+@needs_window
+def test_app(tmp_path):
+    """Plot Look.app is a droplet running this Python with -m plotlook --ui and the files dropped, with a PATH for
+    Homebrew and ~/.local/bin; a Python without tkinter is refused, since the app opens the window"""
     with contextlib.redirect_stdout(io.StringIO()):
         made = app.make_app(tmp_path)
     plist = (made / 'Contents' / 'Info.plist').read_text()
@@ -79,3 +69,15 @@ def test_applescript_and_app(tmp_path):
     assert made.name == 'Plot Look.app' and 'CFBundleDocumentTypes' in plist and 'on open' in src
     assert sys.executable in src and '-m plotlook' in src and '--ui' in src
     assert '/opt/homebrew/bin' in src and '/.local/bin' in src
+    tk0 = sys.modules.get('tkinter')
+    sys.modules['tkinter'] = None                   # import tkinter raises ImportError
+    try:
+        app.make_app(tmp_path / 'no-tk')
+        raise AssertionError('not refused')
+    except SystemExit as e:
+        assert 'tkinter' in str(e) and not (tmp_path / 'no-tk' / 'Plot Look.app').exists()
+    finally:
+        if tk0 is None:
+            sys.modules.pop('tkinter', None)
+        else:
+            sys.modules['tkinter'] = tk0

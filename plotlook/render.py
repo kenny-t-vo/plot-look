@@ -33,7 +33,7 @@ The gain of 33 um and the defaults of sharpen 1.5 and contrast 0.85 were measure
 toner): the gain from a printed calibration strip (a 0.03 pt hatch at 1 mm pitch printed like 11 percent grey, a
 0.2 pt one like 15), sharpen and contrast against photographs of plots taken from 2 to 5 ft.
 """
-import io, math, re, shutil, subprocess, sys, tempfile, time
+import io, math, re, shutil, subprocess, sys, tempfile, threading, time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -64,6 +64,10 @@ POPPLER_HINT = ('plot look needs poppler\'s pdftoppm and pdfinfo on the PATH. In
 
 class TileTooBig(Exception):
     pass
+
+
+class Stopped(Exception):
+    """the render was stopped (its stop event set) between tiles or pages"""
 
 
 def stderr_log(msg):
@@ -324,8 +328,9 @@ def margin(gain_px):
     return max(2, math.ceil(gain_px - 1e-9) + 1)
 
 
-def device_reduce(pdf, page, dpi, region, k, gain_px, tile=TILE, workers=WORKERS, log=None):
-    """the page's region (x0, y0, w, h in device px) rendered as it prints, spread, and averaged in k x k blocks"""
+def device_reduce(pdf, page, dpi, region, k, gain_px, tile=TILE, workers=WORKERS, log=None, progress=None, stop=None):
+    """the page's region (x0, y0, w, h in device px) rendered as it prints, spread, and averaged in k x k blocks;
+    progress(done, total) after each tile, from the worker threads; Stopped raised before a tile once stop is set"""
     import numpy as np
     x0, y0, W, H = region
     ov = margin(gain_px)
@@ -334,6 +339,7 @@ def device_reduce(pdf, page, dpi, region, k, gain_px, tile=TILE, workers=WORKERS
     tw, th = -(-(-(-W // nx)) // k) * k, -(-(-(-H // ny)) // k) * k     # k-aligned tile sides
     cores = [(cx, cy, min(tw, W - cx), min(th, H - cy)) for cy in range(0, H, th) for cx in range(0, W, tw)]
     split, nudged = [], []
+    lock, done = threading.Lock(), [0]
 
     def work(core, tmp):
         cx, cy, cw, ch = core
@@ -363,9 +369,18 @@ def device_reduce(pdf, page, dpi, region, k, gain_px, tile=TILE, workers=WORKERS
         b = block_sums(c, k)
         out[cy // k:cy // k + b.shape[0], cx // k:cx // k + b.shape[1]] = b
 
+    def one(core, tmp):
+        if stop is not None and stop.is_set():
+            raise Stopped
+        work(core, tmp)
+        if progress:
+            with lock:              # so the counts arrive in order
+                done[0] += 1
+                progress(done[0], len(cores))
+
     with tempfile.TemporaryDirectory(prefix='plotlook-') as tmp:
         with ThreadPoolExecutor(max(1, workers)) as ex:
-            for f in [ex.submit(work, core, tmp) for core in cores]:
+            for f in [ex.submit(one, core, tmp) for core in cores]:
                 f.result()
     if log and nudged:
         log(f'  {len(nudged)} tile(s) rendered at {", ".join(sorted({f"{dpi + d:g}" for d in nudged}))} dpi, where '
@@ -436,9 +451,10 @@ def out_name(stem, page, npages, opts):
             f'{"-bond" if opts.paper == "bond" else ""}{"-colour" if getattr(opts, "colour", False) else ""}{crop}.png')
 
 
-def plotlook(src, opts, log=stderr_log, write=write_file, device_dpi=None):
+def plotlook(src, opts, log=stderr_log, write=write_file, device_dpi=None, progress=None, stop=None):
     """render the file's pages; the PNGs (and JPEGs) written. device_dpi: a function of the file giving its device dpi
-    when opts.device_dpi is not set"""
+    when opts.device_dpi is not set; progress(done, total): the tiles of a page, called from the worker threads after
+    each; stop, a threading.Event: once set, Stopped is raised after the tiles in progress, or between pages"""
     from PIL import Image
     require_poppler()
     src = Path(src).absolute()
@@ -469,8 +485,10 @@ def plotlook(src, opts, log=stderr_log, write=write_file, device_dpi=None):
         side = opts.tile + max(j[7] for j in jobs) + 2 * margin(gain_px)
         tiles_src = vector_patterns(src, tmp, side, dev_dpi - 1, log)
         for p, region, w_in, h_in, ow, oh, odpi, k in jobs:
+            if stop is not None and stop.is_set():
+                raise Stopped
             t0 = time.time()
-            cov = device_reduce(tiles_src, p, dev_dpi, region, k, gain_px, opts.tile, opts.workers, log)
+            cov = device_reduce(tiles_src, p, dev_dpi, region, k, gain_px, opts.tile, opts.workers, log, progress, stop)
             img = finish(cov, (ow, oh), opts.paper, opts.sharpen, opts.contrast)
             del cov
             if getattr(opts, 'colour', False):
@@ -491,8 +509,9 @@ def plotlook(src, opts, log=stderr_log, write=write_file, device_dpi=None):
     return written
 
 
-def run(src, opts):
+def run(src, opts, progress=None, stop=None):
     """plotlook() with the log, writer and device dpi the command line set up (opts.quiet, opts.host)"""
     host = getattr(opts, 'host', None)
     return plotlook(src, opts, log=None if getattr(opts, 'quiet', False) else stderr_log,
-                    write=getattr(host, 'write', None) or write_file, device_dpi=getattr(host, 'device_dpi', None))
+                    write=getattr(host, 'write', None) or write_file, device_dpi=getattr(host, 'device_dpi', None),
+                    progress=progress, stop=stop)
