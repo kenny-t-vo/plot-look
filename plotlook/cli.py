@@ -59,6 +59,8 @@ def parser(prog='plotlook'):
     o = a.add_argument_group('output')
     o.add_argument('--out', metavar='DIR', help='folder for the PNGs (default beside each PDF)')
     o.add_argument('--jpeg', action='store_true', help='also a quality 92 JPEG')
+    o.add_argument('--colour', '--color', action='store_true', dest='colour',
+                   help='keep the drawing\'s colours at the plotted tone (for screens; not a colour proof)')
     o.add_argument('-q', '--quiet', action='store_true', help='no progress lines')
     p = a.add_argument_group('presets')
     p.add_argument('--save-preset', metavar='NAME', help='save the options given as a preset')

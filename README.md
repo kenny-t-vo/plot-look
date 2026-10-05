@@ -45,6 +45,8 @@ plotlook a.pdf --preset 4k --paper bond --jpeg
 3. Averages down to the output size in linear light, so a field of fine marks keeps the tone it has on paper.
 4. Applies an unsharp mask on darkness (`--sharpen`, 1.5) and a gamma on coverage (`--contrast`, 0.85), for how the plot reads from a few feet away.
 
+`--colour` adds a step after 4: the page is rendered once more in colour, anti-aliased, at the output size, and each pixel takes that render's hue at the tone steps 1 to 4 gave it, so a grey is exactly as plotted and a colour fill under black marks keeps its colour at the marks' plotted tone. It is for showing a drawing's colour on screen, not a proof of how a colour plotter prints it.
+
 `--device-dpi` (600) and `--gain` (33 µm) set the device.
 
 ## Calibration

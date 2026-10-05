@@ -1,6 +1,7 @@
 import contextlib, io, json, sys
 from types import SimpleNamespace
 
+import numpy as np
 from PIL import Image
 
 from plotlook import __version__, cli, presets, render
@@ -116,3 +117,23 @@ def test_version_help_and_platform():
         assert 'macOS only' in refused('--make-app')
     finally:
         sys.platform = plat
+
+
+@needs('pdftoppm')
+def test_colour(tmp_path):
+    """--colour keeps a fill's hue at the plotted tone, under black lines too, and leaves a grey exactly as plotted"""
+    lines = ' '.join(f'{x:.2f} 72 m {x:.2f} 144 l S' for x in [73 + i * 2.835 for i in range(24)])
+    content = (f'0 0.85 0.95 0.1 k 72 72 72 72 re f 0.5 g 0 0 72 216 re f '
+               f'/G0 gs 0 G 0.2 w {lines}').encode()
+    pdf, o = page_pdf(tmp_path / 'c.pdf', content, w=216, h=216), tmp_path / 'o'
+    o.mkdir()
+    run(pdf, '--dpi', '50', '--out', o, '-q')
+    run(pdf, '--dpi', '50', '--colour', '--out', o, '-q')
+    g = np.asarray(Image.open(o / 'c-50dpi.png'), float)
+    c = np.asarray(Image.open(o / 'c-50dpi-colour.png'), float)
+    assert c.ndim == 3 and g.shape == c.shape[:2]
+    fill, grey = c[60:90, 60:90], c[60:90, 5:40]
+    lum = lambda a: 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+    assert fill[..., 0].mean() > fill[..., 1].mean() + 40 > fill[..., 2].mean() + 40       # red over green over blue
+    assert np.abs(grey - g[60:90, 5:40, None]).max() <= 1                                  # the grey as plotted
+    assert abs(lum(fill).mean() - g[60:90, 60:90].mean()) < 30                              # the fill near its plotted tone

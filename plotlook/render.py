@@ -15,7 +15,12 @@
 5. sRGB encode, then sharpen: an unsharp mask on darkness (1 - encoded value), sigma 1 output px, amount A, clipped
    to paper and toner. It darkens marks against their surroundings and leaves the tone of large textured areas nearly
    as it is.
-6. 8-bit PNG with its dpi (mode L on white, RGB on bond); optionally also a quality 92 JPEG.
+6. colour (--colour): the page rendered once more in RGB, anti-aliased, at the output size (at most COLOUR_PX on its long
+   side, then resized), and each output pixel given that render's chroma at the tone steps 1 to 5 gave it: the plotted
+   tone times the render's linear RGB over its luminance. A grey keeps exactly its plotted tone; a colour fill under
+   black marks keeps its hue at the marks' plotted tone. It shows a drawing's colour on screen; it is not a model of
+   how a colour plotter prints it.
+7. 8-bit PNG with its dpi (mode L on white, RGB on bond or with colour); optionally also a quality 92 JPEG.
 
 The gain of 33 um and the defaults of sharpen 1.5 and contrast 0.85 were measured on a Canon ColorWave 3600 (600 dpi
 toner): the gain from a printed calibration strip (a 0.03 pt hatch at 1 mm pitch printed like 11 percent grey, a
@@ -32,6 +37,7 @@ WORKERS = 3
 NUDGE = (0, 0.05, 0.1, 0.2, -0.05, -0.2, 0.5)   # dpi added in turn when pdftoppm leaves out a tiling pattern; across a
                                                 # 2400 px tile at 600 dpi that drifts 0.2 px at 0.05, 2 px at 0.5
 STRIP = 1024                      # output rows encoded at a time
+COLOUR_PX = 6000                  # the colour render's long side at most; colour is resized up past it
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)   # windows: no console window for each pdftoppm under a gui
 PAPERS = {'white': dict(paper=(1.0,), toner=0.0),
           'bond': dict(paper=(0.955, 0.94, 0.905), toner=0.06)}   # linear reflectance, r g b
@@ -180,6 +186,46 @@ def srgb(x):
     return np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(np.maximum(x, 0), 1 / 2.4) - 0.055)
 
 
+def linear(e):
+    """sRGB-encoded values, 0 to 1, to linear light"""
+    import numpy as np
+    return np.where(e <= 0.04045, e / 12.92, np.power((e + 0.055) / 1.055, 2.4))
+
+
+def colour_layer(pdf, page, region_in, size, tmp):
+    """the page's colours over region_in (x0, y0, w, h in inches) at size (w, h px): linear RGB, anti-aliased"""
+    import numpy as np
+    from PIL import Image
+    x0, y0, w_in, h_in = region_in
+    ow, oh = size
+    s = min(1.0, COLOUR_PX / max(ow, oh))
+    rw, rh = max(1, round(ow * s)), max(1, round(oh * s))
+    dpi = rw / w_in
+    stem = Path(tmp) / f'colour-{page}'
+    args = ['pdftoppm', '-r', f'{dpi:.6f}', '-f', str(page), '-l', str(page), '-singlefile',
+            '-x', str(round(x0 * dpi)), '-y', str(round(y0 * dpi)), '-W', str(rw), '-H', str(rh), str(pdf), str(stem)]
+    r = subprocess.run(args, capture_output=True, encoding='utf-8', errors='replace', creationflags=NO_WINDOW)
+    if r.returncode:
+        raise SystemExit(f'pdftoppm could not render {pdf} in colour: {r.stderr.strip()[-300:]}')
+    path = Path(f'{stem}.ppm')
+    im = Image.open(path)
+    im.load()
+    path.unlink()
+    if im.size != (ow, oh):
+        im = im.resize((ow, oh), Image.LANCZOS)
+    return linear(np.asarray(im.convert('RGB'), np.float32) / 255.0)
+
+
+def tinted(img, rgb):
+    """an 8-bit plotted image (grey, or RGB on bond) given the chroma of rgb (linear, the same size): 8-bit RGB"""
+    import numpy as np
+    t = linear(img.astype(np.float32) / 255.0)
+    t = np.repeat(t[:, :, None], 3, axis=2) if t.ndim == 2 else t
+    y = rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    ratio = np.where(y[:, :, None] > 1e-3, rgb / np.maximum(y, 1e-3)[:, :, None], 1.0)
+    return np.round(srgb(np.clip(t * ratio, 0, 1)) * 255).astype(np.uint8)
+
+
 def render_tile(pdf, page, dpi, x, y, w, h, tmp):
     """a tile of the device raster as coverage, 0 to 1"""
     import numpy as np
@@ -313,7 +359,7 @@ def out_name(stem, page, npages, opts):
     crop = '-crop-' + '-'.join(f'{v:g}' for v in opts.crop) if opts.crop else ''
     name = getattr(opts, 'preset_name', None)
     return (f'{stem}{f"-p{page}" if npages > 1 else ""}-{size_label(opts)}{f"-{name}" if name else ""}'
-            f'{"-bond" if opts.paper == "bond" else ""}{crop}.png')
+            f'{"-bond" if opts.paper == "bond" else ""}{"-colour" if getattr(opts, "colour", False) else ""}{crop}.png')
 
 
 def plotlook(src, opts, log=stderr_log, write=write_file, device_dpi=None):
@@ -345,6 +391,10 @@ def plotlook(src, opts, log=stderr_log, write=write_file, device_dpi=None):
         cov = device_reduce(src, p, dev_dpi, region, k, gain_px, opts.tile, opts.workers, log)
         img = finish(cov, (ow, oh), opts.paper, opts.sharpen, opts.contrast)
         del cov
+        if getattr(opts, 'colour', False):
+            reg_in = (region[0] / dev_dpi, region[1] / dev_dpi, w_in, h_in)
+            with tempfile.TemporaryDirectory(prefix='plotlook-') as tmp:
+                img = tinted(img, colour_layer(src, p, reg_in, (ow, oh), tmp))
         png = dest / out_name(src.stem, p, len(sizes), opts)
         im = Image.fromarray(img)
         buf = io.BytesIO()
