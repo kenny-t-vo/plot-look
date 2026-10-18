@@ -20,12 +20,14 @@ def needs(*tools):
 
 
 def needs_window(f):
-    """skip a test that opens Tk windows where tkinter or a display is missing, named in f.needs as a missing tool"""
+    """skip a test that opens Tk windows where tkinter or a display is missing, or where PLOTLOOK_NO_WINDOWS is set,
+    named in f.needs as a missing tool"""
     try:
         import tkinter  # noqa: F401
         ok = sys.platform in ('darwin', 'win32') or bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
     except ImportError:
         ok = False
+    ok = ok and not os.environ.get('PLOTLOOK_NO_WINDOWS')
     return f if ok else needs('Tk windows')(f)
 
 
